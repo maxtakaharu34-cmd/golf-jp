@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+<meta name="theme-color" content="#10b981" />
+<title>ホールインワンゴルフ</title>
+<link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+P+One&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box}html,body{margin:0;padding:0;height:100%;overflow:hidden}
+body{font-family:system-ui,sans-serif;color:#fff;background:linear-gradient(180deg,#bbf7d0,#10b981);touch-action:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#app{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;padding:8px;gap:6px}
+.title{font-family:"Mochiy Pop P One",sans-serif;font-size:18px;color:#fff;-webkit-text-stroke:2px #064e3b;paint-order:stroke fill;margin:4px 0}
+.hud{display:flex;justify-content:space-between;width:100%;max-width:480px;gap:6px;font-size:13px;font-weight:bold;color:#064e3b}
+.hud .box{flex:1;background:#fff;border:2px solid #064e3b;border-radius:10px;padding:5px 10px;text-align:center}
+canvas{flex:1;width:100%;max-width:480px;background:#10b981;border:3px solid #064e3b;border-radius:14px;box-shadow:3px 3px 0 #064e3b;touch-action:none}
+.hint{font-size:10px;color:#064e3b;text-align:center}
+.actions{display:flex;gap:8px}
+.actions button{background:#fff;color:#064e3b;border:3px solid #064e3b;padding:8px 16px;border-radius:10px;font-size:12px;font-family:"Mochiy Pop P One",sans-serif;cursor:pointer;box-shadow:2px 2px 0 #064e3b}
+</style>
+</head>
+<body>
+<div id="app">
+<h1 class="title">ホールインワンゴルフ ⛳</h1>
+<div class="hud">
+  <div class="box">Hole: <span id="hl">1</span></div>
+  <div class="box">打数: <span id="sh">0</span></div>
+  <div class="box">合計: <span id="tot">0</span></div>
+</div>
+<canvas id="cv"></canvas>
+<div class="hint">ボールから引っ張って離す（パチンコ式）</div>
+<div class="actions">
+  <button id="btn-reset">↺ リセット</button>
+  <button id="btn-skip">▶ スキップ</button>
+</div>
+</div>
+<script>
+(()=>{
+'use strict';
+const $=(id)=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d');
+let W,H;
+function resize(){const r=cv.getBoundingClientRect();cv.width=r.width;cv.height=r.height;W=cv.width;H=cv.height}
+const HOLES=[
+{ball:[0.5,0.85],hole:[0.5,0.2],walls:[]},
+{ball:[0.2,0.85],hole:[0.8,0.2],walls:[[0.3,0.5,0.4,0.05]]},
+{ball:[0.5,0.85],hole:[0.5,0.2],walls:[[0.1,0.5,0.3,0.05],[0.6,0.5,0.3,0.05]]},
+{ball:[0.15,0.85],hole:[0.85,0.85],walls:[[0.0,0.5,0.7,0.05],[0.3,0.7,0.7,0.05]]},
+{ball:[0.5,0.85],hole:[0.5,0.15],walls:[[0.0,0.4,0.4,0.04],[0.6,0.4,0.4,0.04],[0.0,0.65,0.4,0.04],[0.6,0.65,0.4,0.04]]}
+];
+let hole=0,ball=null,vx=0,vy=0,shots=0,total=0,dragging=false,dragStart=null,dragEnd=null,inHole=false;
+function load(idx){
+  hole=idx;
+  const h=HOLES[idx%HOLES.length];
+  resize();
+  ball={x:h.ball[0]*W,y:h.ball[1]*H,r:10};
+  vx=0;vy=0;shots=0;inHole=false;
+  $('hl').textContent=idx+1;$('sh').textContent=0;$('tot').textContent=total;
+  loop();
+}
+function holePos(){const h=HOLES[hole%HOLES.length];return{x:h.hole[0]*W,y:h.hole[1]*H,r:18}}
+function walls(){const h=HOLES[hole%HOLES.length];return h.walls.map(w=>({x:w[0]*W,y:w[1]*H,w:w[2]*W,h:w[3]*H}))}
+function loop(){
+  ctx.fillStyle='#10b981';ctx.fillRect(0,0,W,H);
+  // pattern
+  for(let i=0;i<W;i+=20)for(let j=0;j<H;j+=20){
+    if((i+j)%40===0){ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(i,j,20,20)}
+  }
+  const hp=holePos();
+  // hole
+  ctx.fillStyle='#000';ctx.beginPath();ctx.arc(hp.x,hp.y,hp.r,0,Math.PI*2);ctx.fill();
+  // flag
+  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(hp.x,hp.y);ctx.lineTo(hp.x,hp.y-30);ctx.stroke();
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.moveTo(hp.x,hp.y-30);ctx.lineTo(hp.x+14,hp.y-25);ctx.lineTo(hp.x,hp.y-20);ctx.fill();
+  // walls
+  ctx.fillStyle='#064e3b';
+  for(const w of walls())ctx.fillRect(w.x,w.y,w.w,w.h);
+  // ball physics
+  if(!inHole){
+    ball.x+=vx;ball.y+=vy;
+    vx*=0.985;vy*=0.985;
+    // walls
+    for(const w of walls()){
+      if(ball.x>w.x-ball.r && ball.x<w.x+w.w+ball.r && ball.y>w.y-ball.r && ball.y<w.y+w.h+ball.r){
+        // bounce: simple — invert vx if mostly horizontal collision
+        const overlapX=Math.min(ball.x-(w.x-ball.r),(w.x+w.w+ball.r)-ball.x);
+        const overlapY=Math.min(ball.y-(w.y-ball.r),(w.y+w.h+ball.r)-ball.y);
+        if(overlapX<overlapY){vx*=-0.9;ball.x+=vx>0?-overlapX:overlapX}
+        else{vy*=-0.9;ball.y+=vy>0?-overlapY:overlapY}
+        beep(440,.04);
+      }
+    }
+    // edge bounce
+    if(ball.x<ball.r){ball.x=ball.r;vx*=-0.9;beep(330,.03)}
+    if(ball.x>W-ball.r){ball.x=W-ball.r;vx*=-0.9;beep(330,.03)}
+    if(ball.y<ball.r){ball.y=ball.r;vy*=-0.9;beep(330,.03)}
+    if(ball.y>H-ball.r){ball.y=H-ball.r;vy*=-0.9;beep(330,.03)}
+    // stop
+    if(Math.abs(vx)<0.05&&Math.abs(vy)<0.05){vx=0;vy=0}
+    // hole check
+    const dx=ball.x-hp.x,dy=ball.y-hp.y;
+    if(Math.sqrt(dx*dx+dy*dy)<hp.r-2 && Math.abs(vx)+Math.abs(vy)<8){
+      inHole=true;total+=shots;$('tot').textContent=total;fanfare();
+      setTimeout(()=>load((hole+1)%HOLES.length),1500);
+    }
+  }
+  // ball
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#064e3b';ctx.lineWidth=1.5;ctx.stroke();
+  // drag arrow
+  if(dragging&&dragStart&&dragEnd){
+    ctx.strokeStyle='#ffe066';ctx.lineWidth=3;ctx.setLineDash([5,5]);
+    ctx.beginPath();ctx.moveTo(ball.x,ball.y);
+    const dx=ball.x-(dragEnd.x-dragStart.x);const dy=ball.y-(dragEnd.y-dragStart.y);
+    ctx.lineTo(dx,dy);ctx.stroke();ctx.setLineDash([]);
+  }
+  requestAnimationFrame(loop);
+}
+let ac=null;const en=()=>{if(!ac)ac=new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();return ac};
+const beep=(f,d,t='triangle',g=.1)=>{const a=en();const o=a.createOscillator();const gn=a.createGain();o.type=t;o.frequency.value=f;gn.gain.value=g;gn.gain.exponentialRampToValueAtTime(.0001,a.currentTime+d);o.connect(gn).connect(a.destination);o.start();o.stop(a.currentTime+d)};
+const fanfare=()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.18),i*100))};
+function getXY(e){const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top}}
+cv.addEventListener('touchstart',e=>{en();if(inHole||(vx*vx+vy*vy)>.5)return;const p=getXY(e);if(Math.hypot(p.x-ball.x,p.y-ball.y)>50)return;dragging=true;dragStart=p;dragEnd=p;e.preventDefault()},{passive:false});
+cv.addEventListener('touchmove',e=>{if(!dragging)return;dragEnd=getXY(e);e.preventDefault()},{passive:false});
+cv.addEventListener('touchend',e=>{if(!dragging)return;dragging=false;
+  const dx=dragStart.x-dragEnd.x,dy=dragStart.y-dragEnd.y;
+  const power=Math.min(20,Math.hypot(dx,dy)/8);
+  const ang=Math.atan2(dy,dx);
+  vx=Math.cos(ang)*power;vy=Math.sin(ang)*power;
+  shots++;$('sh').textContent=shots;
+  beep(880,.1);e.preventDefault()
+},{passive:false});
+cv.addEventListener('mousedown',e=>{en();if(inHole||(vx*vx+vy*vy)>.5)return;const p=getXY(e);if(Math.hypot(p.x-ball.x,p.y-ball.y)>50)return;dragging=true;dragStart=p;dragEnd=p});
+cv.addEventListener('mousemove',e=>{if(!dragging)return;dragEnd=getXY(e)});
+cv.addEventListener('mouseup',e=>{if(!dragging)return;dragging=false;
+  const dx=dragStart.x-dragEnd.x,dy=dragStart.y-dragEnd.y;
+  const power=Math.min(20,Math.hypot(dx,dy)/8);
+  const ang=Math.atan2(dy,dx);
+  vx=Math.cos(ang)*power;vy=Math.sin(ang)*power;
+  shots++;$('sh').textContent=shots;beep(880,.1);
+});
+window.addEventListener('resize',()=>{const h=hole;load(h)});
+$('btn-reset').addEventListener('click',()=>{en();load(hole)});
+$('btn-skip').addEventListener('click',()=>{en();load((hole+1)%HOLES.length)});
+load(0);
+})();
+</script>
+</body>
+</html>
